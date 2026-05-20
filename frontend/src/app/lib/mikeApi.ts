@@ -171,6 +171,63 @@ export async function saveOpenAIConfig(
     });
 }
 
+export type LlmProviderType = "openai-compatible" | "anthropic-compatible" | "google-compatible";
+export type LlmConnection = {
+    id: string;
+    name: string;
+    providerType: LlmProviderType;
+    baseUrl: string;
+    enabled: boolean;
+    hasApiKey: boolean;
+    httpReferer: string | null;
+    appTitle: string | null;
+    modelAllowlist: string[];
+    createdAt: string;
+    updatedAt: string;
+};
+export type LlmModel = {
+    id: string;
+    label: string;
+    connectionId: string;
+    connectionName: string;
+    providerType: LlmProviderType;
+};
+export type ModelSelection = { connectionId: string; modelId: string };
+export type ModelPreferences = { main: ModelSelection | null; tabular: ModelSelection | null };
+
+export async function getLlmConnections(): Promise<LlmConnection[]> {
+    return apiRequest<LlmConnection[]>("/user/connections");
+}
+
+export async function saveLlmConnection(payload: Partial<LlmConnection> & { apiKey?: string | null }): Promise<LlmConnection> {
+    const path = payload.id ? `/user/connections/${payload.id}` : "/user/connections";
+    return apiRequest<LlmConnection>(path, {
+        method: payload.id ? "PATCH" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+    });
+}
+
+export async function deleteLlmConnection(id: string): Promise<void> {
+    await apiRequest(`/user/connections/${id}`, { method: "DELETE" });
+}
+
+export async function getLlmModels(): Promise<LlmModel[]> {
+    return apiRequest<LlmModel[]>("/user/models");
+}
+
+export async function getModelPreferences(): Promise<ModelPreferences> {
+    return apiRequest<ModelPreferences>("/user/model-preferences");
+}
+
+export async function saveModelPreferences(preferences: ModelPreferences): Promise<ModelPreferences> {
+    return apiRequest<ModelPreferences>("/user/model-preferences", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(preferences),
+    });
+}
+
 export async function getProject(projectId: string): Promise<MikeProject> {
     return apiRequest<MikeProject>(`/projects/${projectId}`);
 }

@@ -11,6 +11,7 @@ import { tabularRouter } from "./routes/tabular";
 import { workflowsRouter } from "./routes/workflows";
 import { userRouter } from "./routes/user";
 import { downloadsRouter } from "./routes/downloads";
+import { llmConnectionsRouter } from "./routes/llmConnections";
 
 const app = express();
 const PORT = process.env.PORT ?? 3001;
@@ -117,6 +118,7 @@ app.use("/tabular-review", tabularRouter);
 app.use("/workflows", workflowsRouter);
 app.use("/user", userRouter);
 app.use("/users", userRouter);
+app.use("/user", llmConnectionsRouter);
 app.use("/download", downloadsRouter);
 
 app.get("/health", (_req, res) => res.json({ ok: true }));

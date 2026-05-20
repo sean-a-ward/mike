@@ -19,8 +19,6 @@ import {
 } from "./documentVersions";
 import {
     streamChatWithTools,
-    resolveModel,
-    DEFAULT_MAIN_MODEL,
     type LlmMessage,
     type OpenAIToolSchema,
 } from "./llm";
@@ -2830,10 +2828,10 @@ export async function runLLMStream(params: {
         citationsOpenSeen = false;
     };
 
-    const selectedModel = resolveModel(model, DEFAULT_MAIN_MODEL);
+    if (!model) throw new Error("No main model selected");
 
     await streamChatWithTools({
-        model: selectedModel,
+        model,
         systemPrompt,
         messages: chatMessages,
         tools: activeTools as OpenAIToolSchema[],

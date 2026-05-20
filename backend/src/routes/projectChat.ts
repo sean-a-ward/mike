@@ -12,6 +12,7 @@ import {
     type ChatMessage,
 } from "../lib/chatTools";
 import { getUserApiKeys } from "../lib/userSettings";
+import { resolveSelection } from "../lib/llmConnections";
 import { checkProjectAccess } from "../lib/access";
 
 const PROJECT_SYSTEM_PROMPT_EXTRA = `PROJECT CONTEXT:
@@ -152,7 +153,15 @@ projectChatRouter.post("/", requireAuth, async (req, res) => {
 
     const write = (line: string) => res.write(line);
 
-    const apiKeys = await getUserApiKeys(userId, db);
+    let apiKeys = await getUserApiKeys(userId, db);
+    let selectedModel = model;
+    try {
+        const resolved = await resolveSelection(userId, "main", model, db);
+        apiKeys = resolved.apiKeys;
+        selectedModel = resolved.model;
+    } catch (err) {
+        return void res.status(409).json({ detail: err instanceof Error ? err.message : "No main model selected" });
+    }
 
     try {
         write(`data: ${JSON.stringify({ type: "chat_id", chatId })}\n\n`);
@@ -166,7 +175,7 @@ projectChatRouter.post("/", requireAuth, async (req, res) => {
             write,
             extraTools: PROJECT_EXTRA_TOOLS,
             workflowStore,
-            model,
+            model: selectedModel,
             apiKeys,
             projectId,
         });

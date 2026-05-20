@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { AlertCircle, Check, ChevronDown, Eye, EyeOff } from "lucide-react";
+import { useState } from "react";
+import { Check, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -9,466 +9,141 @@ import {
     DropdownMenuContent,
     DropdownMenuItem,
     DropdownMenuLabel,
-    DropdownMenuSeparator,
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { useUserProfile } from "@/contexts/UserProfileContext";
-import type { ApiKeyState } from "@/app/lib/mikeApi";
-import { MODELS } from "@/app/components/assistant/ModelToggle";
-import {
-    isModelAvailable,
-    modelGroupToProvider,
-    providerLabel,
-} from "@/app/lib/modelAvailability";
+import { useLlmConnections } from "@/contexts/LlmConnectionsContext";
+import type { LlmConnection, LlmProviderType, ModelSelection } from "@/app/lib/mikeApi";
 
-const API_KEY_FIELDS = [
-    {
-        provider: "claude",
-        label: "Anthropic (Claude) API Key",
-        placeholder: "sk-ant-…",
-    },
-    {
-        provider: "gemini",
-        label: "Google (Gemini) API Key",
-        placeholder: "AI…",
-    },
-    {
-        provider: "openai",
-        label: "OpenAI API Key",
-        placeholder: "sk-…",
-    },
-] as const;
+const EMPTY_FORM = {
+    name: "",
+    providerType: "openai-compatible" as LlmProviderType,
+    baseUrl: "https://openrouter.ai/api/v1",
+    apiKey: "",
+    httpReferer: "https://mike.runarr.com",
+    appTitle: "Mike",
+    modelAllowlist: "",
+};
 
 export default function ModelsAndApiKeysPage() {
-    const { profile, updateModelPreference, updateApiKey, updateOpenAIConfig } = useUserProfile();
+    const { connections, models, preferences, saveConnection, deleteConnection, setPreference, loading } = useLlmConnections();
+    const [form, setForm] = useState(EMPTY_FORM);
+    const [saving, setSaving] = useState(false);
 
-    return (
-        <div className="space-y-4">
-            {/* Model Preferences */}
-            <div className="pb-6">
-                <div className="flex items-center gap-2 mb-4">
-                    <h2 className="text-2xl font-medium font-serif">
-                        Model Preferences
-                    </h2>
-                </div>
-                <div className="space-y-4 max-w-md">
-                    <div>
-                        <label className="text-sm text-gray-600 block mb-2">
-                            Tabular review model
-                        </label>
-                        <p className="text-xs text-gray-400 mb-2">
-                            We recommend using a smaller model for tabular
-                            reviews to reduce token costs.
-                        </p>
-                        <TabularModelDropdown
-                            value={
-                                profile?.tabularModel ??
-                                "gemini-3-flash-preview"
-                            }
-                            apiKeys={profile?.apiKeys}
-                            onChange={(id) =>
-                                updateModelPreference("tabularModel", id)
-                            }
-                        />
-                    </div>
-                </div>
-            </div>
-
-            {/* API Keys */}
-            <div className="py-6">
-                <div className="flex items-center gap-2 mb-2">
-                    <h2 className="text-2xl font-medium font-serif">
-                        API Keys
-                    </h2>
-                </div>
-                <p className="text-sm text-gray-500 mb-4 max-w-xl">
-                    You must provide your own API keys for the app to work or
-                    add your API keys into the .env file if you are running your
-                    own instance of Mike.
-                </p>
-                <p className="text-xs text-gray-400 mb-4 max-w-xl">
-                    Title generation automatically routes to the cheapest
-                    configured provider model.
-                </p>
-                <div className="space-y-4 max-w-xl">
-                    <OpenAICompatibleConfigForm
-                        config={profile?.openaiConfig}
-                        onSave={updateOpenAIConfig}
-                    />
-                    {API_KEY_FIELDS.map((field) => (
-                        <ApiKeyField
-                            key={field.provider}
-                            label={field.label}
-                            placeholder={field.placeholder}
-                            hasSavedKey={
-                                !!profile?.apiKeys[field.provider].configured
-                            }
-                            isServerConfigured={
-                                profile?.apiKeys[field.provider].source ===
-                                "env"
-                            }
-                            onSave={(value) =>
-                                updateApiKey(
-                                    field.provider,
-                                    value.trim() || null,
-                                )
-                            }
-                            onRemove={() =>
-                                updateApiKey(field.provider, null)
-                            }
-                        />
-                    ))}
-                </div>
-            </div>
-        </div>
-    );
-}
-
-function TabularModelDropdown({
-    value,
-    onChange,
-    apiKeys,
-}: {
-    value: string;
-    onChange: (id: string) => void;
-    apiKeys?: ApiKeyState;
-}) {
-    const [isOpen, setIsOpen] = useState(false);
-    const selected = MODELS.find((m) => m.id === value);
-    const selectedAvailable = apiKeys ? isModelAvailable(value, apiKeys) : true;
-    const groups: ("Anthropic" | "Google" | "OpenAI")[] = [
-        "Anthropic",
-        "Google",
-        "OpenAI",
-    ];
-
-    return (
-        <DropdownMenu onOpenChange={setIsOpen}>
-            <DropdownMenuTrigger asChild>
-                <button
-                    type="button"
-                    className="w-full h-9 rounded-md border border-gray-300 bg-white px-3 text-sm shadow-sm flex items-center justify-between gap-2 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-black/10"
-                >
-                    <span className="flex items-center gap-2 min-w-0">
-                        {!selectedAvailable && (
-                            <AlertCircle className="h-3.5 w-3.5 shrink-0 text-red-500" />
-                        )}
-                        <span className="truncate text-gray-900">
-                            {selected?.label ?? "Select a model"}
-                        </span>
-                    </span>
-                    <ChevronDown
-                        className={`h-3.5 w-3.5 shrink-0 text-gray-500 transition-transform duration-200 ${isOpen ? "rotate-180" : ""}`}
-                    />
-                </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent
-                className="z-50"
-                style={{ width: "var(--radix-dropdown-menu-trigger-width)" }}
-                align="start"
-            >
-                {groups.map((group, gi) => {
-                    const items = MODELS.filter((m) => m.group === group);
-                    if (items.length === 0) return null;
-                    return (
-                        <div key={group}>
-                            {gi > 0 && <DropdownMenuSeparator />}
-                            <DropdownMenuLabel className="text-[10px] uppercase tracking-wider text-gray-400">
-                                {group}
-                            </DropdownMenuLabel>
-                            {items.map((m) => {
-                                const provider = modelGroupToProvider(m.group);
-                                const available = apiKeys
-                                    ? isModelAvailable(m.id, apiKeys)
-                                    : true;
-                                return (
-                                    <DropdownMenuItem
-                                        key={m.id}
-                                        className="cursor-pointer"
-                                        onSelect={() => onChange(m.id)}
-                                        title={
-                                            !available
-                                                ? `Add a ${providerLabel(provider)} API key to use this model`
-                                                : undefined
-                                        }
-                                    >
-                                        <span
-                                            className={`flex-1 ${available ? "" : "text-gray-400"}`}
-                                        >
-                                            {m.label}
-                                        </span>
-                                        {!available && (
-                                            <AlertCircle className="h-3.5 w-3.5 text-red-500 ml-1" />
-                                        )}
-                                        {m.id === value && available && (
-                                            <Check className="h-3.5 w-3.5 text-gray-600 ml-1" />
-                                        )}
-                                    </DropdownMenuItem>
-                                );
-                            })}
-                        </div>
-                    );
-                })}
-            </DropdownMenuContent>
-        </DropdownMenu>
-    );
-}
-
-function OpenAICompatibleConfigForm({
-    config,
-    onSave,
-}: {
-    config?: {
-        baseUrl: string | null;
-        modelMap: string | null;
-        httpReferer: string | null;
-        appTitle: string | null;
-    };
-    onSave: (config: {
-        baseUrl: string | null;
-        modelMap: string | null;
-        httpReferer: string | null;
-        appTitle: string | null;
-    }) => Promise<boolean>;
-}) {
-    const [baseUrl, setBaseUrl] = useState(config?.baseUrl ?? "");
-    const [modelMap, setModelMap] = useState(config?.modelMap ?? "");
-    const [httpReferer, setHttpReferer] = useState(config?.httpReferer ?? "");
-    const [appTitle, setAppTitle] = useState(config?.appTitle ?? "");
-    const [isSaving, setIsSaving] = useState(false);
-    const [saved, setSaved] = useState(false);
-
-    useEffect(() => {
-        setBaseUrl(config?.baseUrl ?? "");
-        setModelMap(config?.modelMap ?? "");
-        setHttpReferer(config?.httpReferer ?? "");
-        setAppTitle(config?.appTitle ?? "");
-    }, [config]);
-
-    const save = async () => {
-        if (modelMap.trim()) {
-            try {
-                JSON.parse(modelMap);
-            } catch {
-                alert("Model map must be valid JSON.");
-                return;
-            }
-        }
-
-        setIsSaving(true);
-        const ok = await onSave({
-            baseUrl: baseUrl.trim() || null,
-            modelMap: modelMap.trim() || null,
-            httpReferer: httpReferer.trim() || null,
-            appTitle: appTitle.trim() || null,
+    const submit = async () => {
+        setSaving(true);
+        const ok = await saveConnection({
+            name: form.name || "OpenRouter",
+            providerType: form.providerType,
+            baseUrl: form.baseUrl,
+            apiKey: form.apiKey || null,
+            httpReferer: form.httpReferer || null,
+            appTitle: form.appTitle || null,
+            enabled: true,
+            modelAllowlist: form.modelAllowlist.split(",").map((s) => s.trim()).filter(Boolean),
         });
-        setIsSaving(false);
-        if (ok) {
-            setSaved(true);
-            setTimeout(() => setSaved(false), 2000);
-        } else {
-            alert("Failed to save OpenAI-compatible endpoint settings.");
-        }
+        setSaving(false);
+        if (ok) setForm(EMPTY_FORM);
+        else alert("Failed to save connection.");
     };
 
     return (
-        <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
-            <h3 className="text-sm font-medium text-gray-900">
-                OpenAI-compatible endpoint
-            </h3>
-            <p className="mt-1 text-xs text-gray-500">
-                Optional. Use this for OpenRouter, LiteLLM, LM Studio, or another
-                OpenAI-compatible /chat/completions endpoint.
-            </p>
-            <div className="mt-4 space-y-3">
-                <div>
-                    <label className="text-xs text-gray-600 block mb-1">
-                        Base URL
-                    </label>
-                    <Input
-                        value={baseUrl}
-                        onChange={(e) => setBaseUrl(e.target.value)}
-                        placeholder="https://openrouter.ai/api/v1"
-                        spellCheck={false}
-                    />
+        <div className="space-y-8">
+            <section className="pb-2">
+                <h2 className="text-2xl font-medium font-serif mb-4">Model preferences</h2>
+                <div className="space-y-4 max-w-md">
+                    <PreferenceSelect label="Main model" helper="Used for chat and document edits." value={preferences.main} onChange={(s) => setPreference("main", s)} />
+                    <PreferenceSelect label="Tabular review model" helper="Used for tabular review extraction and chat." value={preferences.tabular} onChange={(s) => setPreference("tabular", s)} />
                 </div>
-                <div>
-                    <label className="text-xs text-gray-600 block mb-1">
-                        Model map JSON
-                    </label>
-                    <Input
-                        value={modelMap}
-                        onChange={(e) => setModelMap(e.target.value)}
-                        placeholder='{"gpt-5.5":"openai/gpt-4o","gpt-5.4-mini":"anthropic/claude-sonnet-4.5"}'
-                        spellCheck={false}
-                    />
-                    <p className="mt-1 text-[11px] text-gray-400">
-                        Maps Mike's OpenAI model choices to provider model IDs.
+            </section>
+
+            <section id="connections" className="py-2">
+                <div className="mb-4">
+                    <h2 className="text-2xl font-medium font-serif">Connections</h2>
+                    <p className="text-sm text-gray-500 mt-1 max-w-xl">
+                        Add OpenAI- or Anthropic-compatible endpoints. Mike pulls available models from each endpoint.
                     </p>
                 </div>
-                <div className="grid gap-3 sm:grid-cols-2">
-                    <div>
-                        <label className="text-xs text-gray-600 block mb-1">
-                            HTTP referer
-                        </label>
-                        <Input
-                            value={httpReferer}
-                            onChange={(e) => setHttpReferer(e.target.value)}
-                            placeholder="https://mike.runarr.com"
-                            spellCheck={false}
-                        />
-                    </div>
-                    <div>
-                        <label className="text-xs text-gray-600 block mb-1">
-                            App title
-                        </label>
-                        <Input
-                            value={appTitle}
-                            onChange={(e) => setAppTitle(e.target.value)}
-                            placeholder="Mike"
-                            spellCheck={false}
-                        />
+
+                <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 max-w-xl mb-4">
+                    <h3 className="text-sm font-medium text-gray-900 mb-3">Add connection</h3>
+                    <div className="space-y-3">
+                        <div className="grid gap-3 sm:grid-cols-2">
+                            <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="OpenRouter" />
+                            <select className="h-9 rounded-md border border-gray-300 bg-white px-3 text-sm" value={form.providerType} onChange={(e) => setForm({ ...form, providerType: e.target.value as LlmProviderType })}>
+                                <option value="openai-compatible">OpenAI-compatible</option>
+                                <option value="anthropic-compatible">Anthropic-compatible</option>
+                                <option value="google-compatible">Google-compatible</option>
+                            </select>
+                        </div>
+                        <Input value={form.baseUrl} onChange={(e) => setForm({ ...form, baseUrl: e.target.value })} placeholder="https://openrouter.ai/api/v1" />
+                        <Input type="password" value={form.apiKey} onChange={(e) => setForm({ ...form, apiKey: e.target.value })} placeholder="API key" />
+                        <div className="grid gap-3 sm:grid-cols-2">
+                            <Input value={form.httpReferer} onChange={(e) => setForm({ ...form, httpReferer: e.target.value })} placeholder="HTTP referer" />
+                            <Input value={form.appTitle} onChange={(e) => setForm({ ...form, appTitle: e.target.value })} placeholder="App title" />
+                        </div>
+                        <Input value={form.modelAllowlist} onChange={(e) => setForm({ ...form, modelAllowlist: e.target.value })} placeholder="Optional model IDs, comma-separated" />
+                        <Button onClick={submit} disabled={saving || !form.baseUrl} className="bg-black text-white hover:bg-gray-900">
+                            <Plus className="h-4 w-4 mr-1" /> {saving ? "Saving..." : "Add connection"}
+                        </Button>
                     </div>
                 </div>
-                <Button
-                    type="button"
-                    onClick={save}
-                    disabled={isSaving || saved}
-                    className="bg-black text-white hover:bg-gray-900"
-                >
-                    {isSaving ? "Saving..." : saved ? "Saved" : "Save endpoint settings"}
-                </Button>
-            </div>
+
+                <div className="space-y-3 max-w-xl">
+                    {loading && <p className="text-sm text-gray-500">Loading connections...</p>}
+                    {!loading && !connections.length && <div className="rounded-lg border border-dashed border-gray-200 bg-white px-6 py-10 text-center text-sm text-gray-500">No connections yet. Add one to load models.</div>}
+                    {connections.map((connection) => <ConnectionCard key={connection.id} connection={connection} modelCount={models.filter((m) => m.connectionId === connection.id).length} onDelete={() => deleteConnection(connection.id)} />)}
+                </div>
+            </section>
         </div>
     );
 }
 
-function ApiKeyField({
-    label,
-    placeholder,
-    hasSavedKey,
-    isServerConfigured,
-    onSave,
-    onRemove,
-}: {
-    label: string;
-    placeholder: string;
-    hasSavedKey: boolean;
-    isServerConfigured: boolean;
-    onSave: (value: string) => Promise<boolean>;
-    onRemove: () => Promise<boolean>;
-}) {
-    const [value, setValue] = useState("");
-    const [reveal, setReveal] = useState(false);
-    const [isSaving, setIsSaving] = useState(false);
-    const [saved, setSaved] = useState(false);
-
-    useEffect(() => {
-        setValue("");
-    }, [hasSavedKey]);
-
-    const dirty = value.trim().length > 0;
-
-    const handleSave = async () => {
-        setIsSaving(true);
-        const ok = await onSave(value);
-        setIsSaving(false);
-        if (ok) {
-            setValue("");
-            setSaved(true);
-            setTimeout(() => setSaved(false), 2000);
-        } else {
-            alert(`Failed to save ${label}.`);
-        }
-    };
-
-    const handleRemove = async () => {
-        setIsSaving(true);
-        const ok = await onRemove();
-        setIsSaving(false);
-        if (!ok) alert(`Failed to remove ${label}.`);
-    };
-
+function PreferenceSelect({ label, helper, value, onChange }: { label: string; helper: string; value: ModelSelection | null; onChange: (selection: ModelSelection) => Promise<boolean> }) {
+    const { models } = useLlmConnections();
+    const selected = value ? models.find((m) => m.connectionId === value.connectionId && m.id === value.modelId) : null;
+    const grouped = models.reduce<Record<string, typeof models>>((acc, model) => {
+        (acc[model.connectionName] ??= []).push(model);
+        return acc;
+    }, {});
     return (
         <div>
-            <label className="text-sm text-gray-600 block mb-2">{label}</label>
-            {isServerConfigured && (
-                <div className="mb-2 rounded-md border border-blue-100 bg-blue-50 px-3 py-2">
-                    <p className="text-xs text-blue-800">
-                        A server .env key is configured for this provider.
-                        Browser API-key edits are disabled.
-                    </p>
-                    {hasSavedKey && (
-                        <p className="mt-1 text-xs text-blue-800">
-                            The server key will be used for this provider.
-                        </p>
-                    )}
-                </div>
-            )}
-            {hasSavedKey && !isServerConfigured && (
-                <p className="text-xs text-gray-500 mb-2">
-                    A key is saved. Paste a new key to replace it.
-                </p>
-            )}
-            <div className="flex gap-2">
-                <div className="relative flex-1">
-                    <Input
-                        type={reveal ? "text" : "password"}
-                        value={value}
-                        onChange={(e) => setValue(e.target.value)}
-                        placeholder={
-                            isServerConfigured
-                                ? "Server .env key configured"
-                                : hasSavedKey
-                                  ? "Saved key hidden"
-                                  : placeholder
-                        }
-                        className="pr-10"
-                        autoComplete="off"
-                        spellCheck={false}
-                        disabled={isServerConfigured}
-                    />
-                    <button
-                        type="button"
-                        onClick={() => setReveal((r) => !r)}
-                        disabled={isServerConfigured}
-                        className="absolute inset-y-0 right-2 flex items-center text-gray-400 hover:text-gray-600 disabled:cursor-not-allowed disabled:opacity-40"
-                        aria-label={reveal ? "Hide key" : "Show key"}
-                    >
-                        {reveal ? (
-                            <EyeOff className="h-4 w-4" />
-                        ) : (
-                            <Eye className="h-4 w-4" />
-                        )}
+            <label className="text-sm text-gray-600 block mb-1">{label}</label>
+            <p className="text-xs text-gray-400 mb-2">{helper}</p>
+            <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                    <button className="w-full h-9 rounded-md border border-gray-300 bg-white px-3 text-sm shadow-sm flex items-center justify-between gap-2 hover:bg-gray-50">
+                        <span className="truncate text-gray-900">{selected ? `${selected.connectionName} · ${selected.id}` : "No model selected"}</span>
                     </button>
-                </div>
-                <Button
-                    onClick={handleSave}
-                    disabled={isServerConfigured || isSaving || !dirty || saved}
-                    className="min-w-[80px] transition-all bg-black hover:bg-gray-900 text-white"
-                >
-                    {isSaving ? (
-                        "Saving..."
-                    ) : saved ? (
-                        <>
-                            <Check className="h-4 w-3" />
-                            Saved
-                        </>
-                    ) : (
-                        "Save"
-                    )}
-                </Button>
-                {hasSavedKey && !isServerConfigured && (
-                    <Button
-                        type="button"
-                        variant="outline"
-                        onClick={handleRemove}
-                        disabled={isSaving}
-                    >
-                        Remove
-                    </Button>
-                )}
+                </DropdownMenuTrigger>
+                <DropdownMenuContent className="w-72 z-50" align="start">
+                    {!models.length && <DropdownMenuItem disabled>Add a connection first</DropdownMenuItem>}
+                    {Object.entries(grouped).map(([connectionName, items]) => (
+                        <div key={connectionName}>
+                            <DropdownMenuLabel className="text-[10px] uppercase tracking-wider text-gray-400">{connectionName}</DropdownMenuLabel>
+                            {items.map((m) => (
+                                <DropdownMenuItem key={`${m.connectionId}::${m.id}`} onSelect={() => onChange({ connectionId: m.connectionId, modelId: m.id })}>
+                                    <span className="flex-1 truncate">{m.id}</span>
+                                    {selected?.connectionId === m.connectionId && selected.id === m.id && <Check className="h-3.5 w-3.5 text-gray-600 ml-1" />}
+                                </DropdownMenuItem>
+                            ))}
+                        </div>
+                    ))}
+                </DropdownMenuContent>
+            </DropdownMenu>
+        </div>
+    );
+}
+
+function ConnectionCard({ connection, modelCount, onDelete }: { connection: LlmConnection; modelCount: number; onDelete: () => Promise<boolean> }) {
+    return (
+        <div className="rounded-lg border border-gray-200 bg-white p-4 flex items-center gap-3">
+            <span className="rounded bg-gray-100 px-2 py-1 text-xs text-gray-700">{connection.providerType.replace("-compatible", "")}</span>
+            <div className="min-w-0 flex-1">
+                <div className="truncate text-sm font-medium text-gray-900">{connection.name}</div>
+                <div className="truncate text-xs text-gray-500">{connection.baseUrl}</div>
+                <div className="text-[11px] text-gray-400">{modelCount ? `${modelCount} models` : "Models not loaded"} · {connection.hasApiKey ? "key saved" : "no key"}</div>
             </div>
+            <Button variant="ghost" size="icon" onClick={onDelete} title="Delete connection"><Trash2 className="h-4 w-4" /></Button>
         </div>
     );
 }

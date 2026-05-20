@@ -36,6 +36,8 @@ export type StreamCallbacks = {
     onToolCallStart?: (call: NormalizedToolCall) => void;
 };
 
+export type LlmProviderType = "openai-compatible" | "anthropic-compatible" | "google-compatible";
+
 export type OpenAICompatibleConfig = {
     baseUrl?: string | null;
     modelMap?: string | null;
@@ -47,6 +49,7 @@ export type UserApiKeys = {
     claude?: string | null;
     gemini?: string | null;
     openai?: string | null;
+    providerType?: LlmProviderType;
     openaiConfig?: OpenAICompatibleConfig;
 };
 

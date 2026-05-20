@@ -453,7 +453,7 @@ function TRChatInput({
     isLoading: boolean;
     onSubmit: (value: string) => void;
     onCancel: () => void;
-    model: string;
+    model: string | null;
     onModelChange: (id: string) => void;
     apiKeys?: ApiKeyState;
     onHeightChange: (height: number) => void;
@@ -531,7 +531,6 @@ function TRChatInput({
                     <ModelToggle
                         value={model}
                         onChange={onModelChange}
-                        apiKeys={apiKeys}
                     />
                     <button
                         type="button"
@@ -644,7 +643,7 @@ export function TRChatPanel({
 }: Props) {
     const { profile, updateModelPreference } = useUserProfile();
     const apiKeys = profile?.apiKeys;
-    const currentModel = profile?.tabularModel ?? "gemini-3-flash-preview";
+    const currentModel = profile?.tabularModel ?? null;
     const [apiKeyModalProvider, setApiKeyModalProvider] =
         useState<ModelProvider | null>(null);
     const [chats, setChats] = useState<TRChat[]>([]);

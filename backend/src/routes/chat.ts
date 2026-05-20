@@ -11,7 +11,8 @@ import {
     type ChatMessage,
 } from "../lib/chatTools";
 import { completeText } from "../lib/llm";
-import { getUserApiKeys, getUserModelSettings } from "../lib/userSettings";
+import { getUserApiKeys } from "../lib/userSettings";
+import { resolveSelection } from "../lib/llmConnections";
 import { checkProjectAccess } from "../lib/access";
 
 export const chatRouter = Router();
@@ -395,10 +396,7 @@ chatRouter.post("/:chatId/generate-title", requireAuth, async (req, res) => {
         return void res.status(404).json({ detail: "Chat not found" });
 
     try {
-        const { title_model, api_keys } = await getUserModelSettings(
-            userId,
-            db,
-        );
+        const { model: title_model, apiKeys: api_keys } = await resolveSelection(userId, "main", undefined, db);
         const titleText = await completeText({
             model: title_model,
             user: `Generate a concise title (3–6 words) for a chat in an AI Legal Platform that starts with this message. The title should describe the topic or document — do NOT include words like "Legal Assistant", "AI", "Chat", or any similar prefix. Return only the title, no quotes or punctuation.\n\nMessage: ${message.slice(0, 500)}`,
@@ -556,7 +554,15 @@ chatRouter.post("/", requireAuth, async (req, res) => {
 
     const write = (line: string) => res.write(line);
 
-    const apiKeys = await getUserApiKeys(userId, db);
+    let apiKeys = await getUserApiKeys(userId, db);
+    let selectedModel = model;
+    try {
+        const resolved = await resolveSelection(userId, "main", model, db);
+        apiKeys = resolved.apiKeys;
+        selectedModel = resolved.model;
+    } catch (err) {
+        return void res.status(409).json({ detail: err instanceof Error ? err.message : "No main model selected" });
+    }
 
     try {
         write(`data: ${JSON.stringify({ type: "chat_id", chatId })}\n\n`);
@@ -569,7 +575,7 @@ chatRouter.post("/", requireAuth, async (req, res) => {
             db,
             write,
             workflowStore,
-            model,
+            model: selectedModel,
             apiKeys,
             projectId: resolvedProjectId,
         });

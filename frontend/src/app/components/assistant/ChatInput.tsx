@@ -24,11 +24,7 @@ import { ApiKeyMissingModal } from "../shared/ApiKeyMissingModal";
 import { ModelToggle } from "./ModelToggle";
 import { useSelectedModel } from "@/app/hooks/useSelectedModel";
 import { useUserProfile } from "@/contexts/UserProfileContext";
-import {
-    getModelProvider,
-    isModelAvailable,
-    type ModelProvider,
-} from "@/app/lib/modelAvailability";
+import { type ModelProvider } from "@/app/lib/modelAvailability";
 import type { MikeDocument, MikeMessage } from "../shared/types";
 
 export interface ChatInputHandle {
@@ -113,8 +109,8 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput(
     const handleSubmit = () => {
         const query = value.trim();
         if (!query || isLoading) return;
-        if (apiKeys && !isModelAvailable(model, apiKeys)) {
-            setApiKeyModalProvider(getModelProvider(model));
+        if (!model) {
+            window.location.href = "/account/models";
             return;
         }
         setValue("");
@@ -135,7 +131,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput(
             content: query,
             files: files.length > 0 ? files : undefined,
             workflow: wf ?? undefined,
-            model,
+            model: model ?? undefined,
         });
     };
 
@@ -274,7 +270,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput(
                             <ModelToggle
                                 value={model}
                                 onChange={setModel}
-                                apiKeys={apiKeys}
+            
                             />
                             <button
                                 type="button"
