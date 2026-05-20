@@ -32,6 +32,7 @@ import { ModelToggle } from "../assistant/ModelToggle";
 import { ApiKeyMissingModal } from "../shared/ApiKeyMissingModal";
 import { PreResponseWrapper } from "../shared/PreResponseWrapper";
 import { useUserProfile } from "@/contexts/UserProfileContext";
+import { useLlmConnections } from "@/contexts/LlmConnectionsContext";
 import {
     getModelProvider,
     isModelAvailable,
@@ -641,9 +642,10 @@ export function TRChatPanel({
     initialChatId,
     onChatIdChange,
 }: Props) {
-    const { profile, updateModelPreference } = useUserProfile();
+    const { profile } = useUserProfile();
+    const { preferences, setPreference } = useLlmConnections();
     const apiKeys = profile?.apiKeys;
-    const currentModel = profile?.tabularModel ?? null;
+    const currentModel = preferences.tabular ? `${preferences.tabular.connectionId}::${preferences.tabular.modelId}` : null;
     const [apiKeyModalProvider, setApiKeyModalProvider] =
         useState<ModelProvider | null>(null);
     const [chats, setChats] = useState<TRChat[]>([]);
@@ -1488,9 +1490,10 @@ export function TRChatPanel({
                 onSubmit={handleSubmit}
                 onCancel={handleCancel}
                 model={currentModel}
-                onModelChange={(id) =>
-                    updateModelPreference("tabularModel", id)
-                }
+                onModelChange={(id) => {
+                    const [connectionId, ...rest] = id.split("::");
+                    void setPreference("tabular", { connectionId, modelId: rest.join("::") });
+                }}
                 apiKeys={apiKeys}
                 onHeightChange={setInputHeight}
             />

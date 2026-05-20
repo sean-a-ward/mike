@@ -1,3 +1,5 @@
+import dns from "dns/promises";
+import net from "net";
 import { createServerSupabase } from "./supabase";
 import { decryptSecret, encryptSecret } from "./encryption";
 import type { LlmProviderType, UserApiKeys } from "./llm";
@@ -54,19 +56,36 @@ function serialize(row: ConnectionRow): LlmConnection {
 }
 
 function validateProviderType(value: unknown): LlmProviderType {
-    if (value === "openai-compatible" || value === "anthropic-compatible" || value === "google-compatible") return value;
-    throw new Error("Unsupported provider type");
+    if (value === "openai-compatible") return value;
+    throw new Error("Only OpenAI-compatible endpoints are currently supported");
 }
 
-function validateBaseUrl(value: unknown): string {
+function isPrivateIp(address: string): boolean {
+    if (address === "169.254.169.254") return true;
+    if (net.isIP(address) === 4) {
+        const [a, b] = address.split(".").map(Number);
+        return a === 10 || a === 127 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 169 && b === 254) || a === 0;
+    }
+    if (net.isIP(address) === 6) {
+        const normalized = address.toLowerCase();
+        return normalized === "::1" || normalized.startsWith("fc") || normalized.startsWith("fd") || normalized.startsWith("fe80:");
+    }
+    return false;
+}
+
+async function validateBaseUrl(value: unknown): Promise<string> {
     if (typeof value !== "string" || !value.trim()) throw new Error("Base URL is required");
     const url = new URL(value.trim());
     if (url.protocol !== "https:" && process.env.ALLOW_INSECURE_LLM_ENDPOINTS !== "true") {
         throw new Error("Endpoint URL must use HTTPS");
     }
     const host = url.hostname.toLowerCase();
-    if (["localhost", "127.0.0.1", "0.0.0.0", "::1"].includes(host)) {
+    if (["localhost", "0", "metadata.google.internal"].includes(host)) {
         throw new Error("Local endpoint URLs are not allowed");
+    }
+    const records = await dns.lookup(host, { all: true, verbatim: true });
+    if (!records.length || records.some((record) => isPrivateIp(record.address))) {
+        throw new Error("Endpoint URL resolves to a private or local address");
     }
     return value.trim().replace(/\/+$/, "");
 }
@@ -95,7 +114,7 @@ export async function saveConnection(userId: string, body: Record<string, unknow
         user_id: userId,
         name: typeof body.name === "string" && body.name.trim() ? body.name.trim() : "Untitled connection",
         provider_type: validateProviderType(body.providerType),
-        base_url: validateBaseUrl(body.baseUrl),
+        base_url: await validateBaseUrl(body.baseUrl),
         enabled: body.enabled !== false,
         http_referer: typeof body.httpReferer === "string" && body.httpReferer.trim() ? body.httpReferer.trim() : null,
         app_title: typeof body.appTitle === "string" && body.appTitle.trim() ? body.appTitle.trim() : null,

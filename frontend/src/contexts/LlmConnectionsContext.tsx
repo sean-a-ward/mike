@@ -46,7 +46,7 @@ export function LlmConnectionsProvider({ children }: { children: React.ReactNode
         setLoading(true);
         try {
             const [nextConnections, nextModels, nextPreferences] = await Promise.all([
-                getLlmConnections(),
+                getLlmConnections().catch(() => []),
                 getLlmModels().catch(() => []),
                 getModelPreferences().catch(() => EMPTY_PREFS),
             ]);

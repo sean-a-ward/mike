@@ -104,7 +104,7 @@ export interface UserProfile {
     creditsResetDate: string;
     creditsRemaining: number;
     tier: string;
-    tabularModel: string;
+    tabularModel: string | null;
     apiKeyStatus: ApiKeyStatus;
 }
 

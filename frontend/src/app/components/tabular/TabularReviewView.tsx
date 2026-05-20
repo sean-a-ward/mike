@@ -93,7 +93,6 @@ export function TRView({ reviewId, projectId }: Props) {
     const router = useRouter();
     const { profile } = useUserProfile();
     const apiKeys = profile?.apiKeys;
-    const tabularModel = profile?.tabularModel ?? "gemini-3-flash-preview";
 
     useEffect(() => {
         const params = new URLSearchParams(window.location.search);
@@ -221,10 +220,6 @@ export function TRView({ reviewId, projectId }: Props) {
     }
 
     async function handleRegenerateCell(docId: string, colIndex: number) {
-        if (apiKeys && !isModelAvailable(tabularModel, apiKeys)) {
-            setApiKeyModalProvider(getModelProvider(tabularModel));
-            return;
-        }
 
         setCells((prev) =>
             prev.map((c) =>
@@ -277,10 +272,6 @@ export function TRView({ reviewId, projectId }: Props) {
         // If columns changed since last save, update the review first
         if (columns.length === 0) return;
 
-        if (apiKeys && !isModelAvailable(tabularModel, apiKeys)) {
-            setApiKeyModalProvider(getModelProvider(tabularModel));
-            return;
-        }
 
         setGenerating(true);
 
@@ -292,7 +283,7 @@ export function TRView({ reviewId, projectId }: Props) {
                     payload &&
                     ["claude", "gemini", "openai"].includes(payload.provider)
                         ? (payload.provider as ModelProvider)
-                        : getModelProvider(tabularModel);
+                        : "openai";
                 if (payload?.code === "missing_api_key" && provider) {
                     setApiKeyModalProvider(provider);
                 }

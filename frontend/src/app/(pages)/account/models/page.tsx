@@ -71,8 +71,6 @@ export default function ModelsAndApiKeysPage() {
                             <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="OpenRouter" />
                             <select className="h-9 rounded-md border border-gray-300 bg-white px-3 text-sm" value={form.providerType} onChange={(e) => setForm({ ...form, providerType: e.target.value as LlmProviderType })}>
                                 <option value="openai-compatible">OpenAI-compatible</option>
-                                <option value="anthropic-compatible">Anthropic-compatible</option>
-                                <option value="google-compatible">Google-compatible</option>
                             </select>
                         </div>
                         <Input value={form.baseUrl} onChange={(e) => setForm({ ...form, baseUrl: e.target.value })} placeholder="https://openrouter.ai/api/v1" />

@@ -27,7 +27,7 @@ interface UserProfile {
     creditsResetDate: string;
     creditsRemaining: number;
     tier: string;
-    tabularModel: string;
+    tabularModel: string | null;
     apiKeys: ApiKeyState;
     openaiConfig: OpenAIProviderConfig;
 }
@@ -110,7 +110,7 @@ export function UserProfileProvider({ children }: { children: ReactNode }) {
                 creditsResetDate: futureResetDate.toISOString(),
                 creditsRemaining: 999999, // temporarily unlimited
                 tier: "Free",
-                tabularModel: "gemini-3-flash-preview",
+                tabularModel: null,
                 apiKeys: emptyApiKeys(),
                 openaiConfig: {
                     baseUrl: null,

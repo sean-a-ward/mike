@@ -12,10 +12,7 @@ import {
 } from "../lib/chatTools";
 import {
     completeText,
-    providerForModel,
     streamChatWithTools,
-    type Provider,
-    type UserApiKeys,
 } from "../lib/llm";
 import { getUserModelSettings } from "../lib/userSettings";
 import {
@@ -51,22 +48,6 @@ function formatPromptSuffix(format?: string, tags?: string[]): string {
 }
 
 export const tabularRouter = Router();
-
-function providerLabel(provider: Provider): string {
-    if (provider === "claude") return "Anthropic";
-    if (provider === "openai") return "OpenAI";
-    return "Gemini";
-}
-
-function missingModelApiKey(model: string, apiKeys: UserApiKeys) {
-    const provider = providerForModel(model);
-    if (apiKeys[provider]?.trim()) return null;
-    return {
-        provider,
-        model,
-        detail: `${providerLabel(provider)} API key is required to use ${model}. Add an API key or select a different tabular review model.`,
-    };
-}
 
 // GET /tabular-review
 tabularRouter.get("/", requireAuth, async (req, res) => {
@@ -755,13 +736,6 @@ tabularRouter.post(
             userId,
             db,
         );
-        const missingKey = missingModelApiKey(tabular_model, api_keys);
-        if (missingKey) {
-            return void res.status(422).json({
-                code: "missing_api_key",
-                ...missingKey,
-            });
-        }
 
         await db
             .from("tabular_cells")
@@ -880,13 +854,6 @@ tabularRouter.post("/:reviewId/generate", requireAuth, async (req, res) => {
     }
 
     const { tabular_model, api_keys } = await getUserModelSettings(userId, db);
-    const missingKey = missingModelApiKey(tabular_model, api_keys);
-    if (missingKey) {
-        return void res.status(422).json({
-            code: "missing_api_key",
-            ...missingKey,
-        });
-    }
 
     res.setHeader("Content-Type", "text/event-stream");
     res.setHeader("Cache-Control", "no-cache");
@@ -1279,13 +1246,6 @@ tabularRouter.post("/:reviewId/chat", requireAuth, async (req, res) => {
     };
 
     const { tabular_model, api_keys } = await getUserModelSettings(userId, db);
-    const missingKey = missingModelApiKey(tabular_model, api_keys);
-    if (missingKey) {
-        return void res.status(422).json({
-            code: "missing_api_key",
-            ...missingKey,
-        });
-    }
 
     // Create or verify chat record
     let chatId = existingChatId ?? null;
