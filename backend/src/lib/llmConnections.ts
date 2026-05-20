@@ -76,15 +76,16 @@ function isPrivateIp(address: string): boolean {
 async function validateEndpointUrl(value: unknown): Promise<URL> {
     if (typeof value !== "string" || !value.trim()) throw new Error("Base URL is required");
     const url = new URL(value.trim());
-    if (url.protocol !== "https:" && process.env.ALLOW_INSECURE_LLM_ENDPOINTS !== "true") {
+    const allowInsecure = process.env.ALLOW_INSECURE_LLM_ENDPOINTS === "true";
+    if (url.protocol !== "https:" && !allowInsecure) {
         throw new Error("Endpoint URL must use HTTPS");
     }
     const host = url.hostname.toLowerCase();
-    if (["localhost", "0", "metadata.google.internal"].includes(host)) {
+    if (["localhost", "0", "metadata.google.internal"].includes(host) && !allowInsecure) {
         throw new Error("Local endpoint URLs are not allowed");
     }
     const records = await dns.lookup(host, { all: true, verbatim: true });
-    if (!records.length || records.some((record) => isPrivateIp(record.address))) {
+    if (!records.length || (records.some((record) => isPrivateIp(record.address)) && !allowInsecure)) {
         throw new Error("Endpoint URL resolves to a private or local address");
     }
     return url;
