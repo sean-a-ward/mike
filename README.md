@@ -60,6 +60,12 @@ R2_BUCKET_NAME=mike
 GEMINI_API_KEY=your-gemini-key
 ANTHROPIC_API_KEY=your-anthropic-key
 OPENAI_API_KEY=your-openai-key
+# Optional: use an OpenAI-compatible endpoint such as OpenRouter.
+# OPENAI_BASE_URL=https://openrouter.ai/api/v1
+# OPENAI_USE_CHAT_COMPLETIONS=true
+# OPENAI_MODEL_MAP={"gpt-5.5":"openai/gpt-4o","gpt-5.4-mini":"anthropic/claude-sonnet-4.5","gpt-5.4-nano":"google/gemini-2.5-flash-lite"}
+# OPENAI_HTTP_REFERER=https://mike.runarr.com
+# OPENAI_APP_TITLE=Mike
 RESEND_API_KEY=your-resend-key
 USER_API_KEYS_ENCRYPTION_SECRET=your-long-random-secret
 ```
@@ -75,6 +81,22 @@ NEXT_PUBLIC_API_BASE_URL=http://localhost:3001
 Supabase values come from the project dashboard. Use the project URL for `SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_URL`, the service role key for the backend `SUPABASE_SECRET_KEY`, and the anon/public key for `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY`. If your Supabase project shows multiple key formats, use the legacy JWT-style anon and service role keys expected by the Supabase client libraries.
 
 Provider keys are only needed for the models and email features you plan to use. Model provider keys can be configured in `backend/.env` for the whole instance, or per user in **Account > Models & API Keys**. If a provider key is present in `backend/.env`, that provider is available by default and the matching browser API key field is read-only.
+
+### OpenAI-compatible endpoints and OpenRouter
+
+By default, OpenAI models use OpenAI's Responses API at `https://api.openai.com/v1`. To use OpenRouter or another OpenAI-compatible Chat Completions endpoint, set `OPENAI_BASE_URL`. Non-OpenAI base URLs automatically use `/chat/completions` instead of `/responses`.
+
+For OpenRouter:
+
+```bash
+OPENAI_API_KEY=your-openrouter-key
+OPENAI_BASE_URL=https://openrouter.ai/api/v1
+OPENAI_MODEL_MAP={"gpt-5.5":"openai/gpt-4o","gpt-5.4-mini":"anthropic/claude-sonnet-4.5","gpt-5.4-nano":"google/gemini-2.5-flash-lite"}
+OPENAI_HTTP_REFERER=https://mike.runarr.com
+OPENAI_APP_TITLE=Mike
+```
+
+`OPENAI_MODEL_MAP` lets Mike's built-in OpenAI choices route to model IDs required by your compatible provider. `OPENAI_HTTP_REFERER` and `OPENAI_APP_TITLE` are optional headers recommended by OpenRouter.
 
 ## Install
 

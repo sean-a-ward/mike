@@ -7,7 +7,7 @@ import type {
     StreamChatResult,
 } from "./types";
 
-const OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses";
+const DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1";
 const MAX_OUTPUT_TOKENS = 16384;
 
 type ResponseInputItem =
@@ -35,6 +35,69 @@ type ResponseStreamEvent = {
     item?: ResponseFunctionCallItem;
 };
 
+type ChatMessage =
+    | { role: "system" | "user" | "assistant"; content: string | null; tool_calls?: ChatToolCall[] }
+    | { role: "tool"; tool_call_id: string; content: string };
+
+type ChatTool = {
+    type: "function";
+    function: {
+        name: string;
+        description?: string;
+        parameters: Record<string, unknown>;
+    };
+};
+
+type ChatToolCall = {
+    id: string;
+    type: "function";
+    function: {
+        name: string;
+        arguments: string;
+    };
+};
+
+type ChatStreamChoiceDelta = {
+    content?: string | null;
+    tool_calls?: {
+        index: number;
+        id?: string;
+        type?: "function";
+        function?: {
+            name?: string;
+            arguments?: string;
+        };
+    }[];
+};
+
+type ChatStreamEvent = {
+    choices?: { delta?: ChatStreamChoiceDelta; finish_reason?: string | null }[];
+};
+
+function trimTrailingSlash(value: string): string {
+    return value.replace(/\/+$/, "");
+}
+
+function openAIBaseUrl(): string {
+    return trimTrailingSlash(
+        process.env.OPENAI_BASE_URL?.trim() || DEFAULT_OPENAI_BASE_URL,
+    );
+}
+
+function responsesUrl(): string {
+    return `${openAIBaseUrl()}/responses`;
+}
+
+function chatCompletionsUrl(): string {
+    return `${openAIBaseUrl()}/chat/completions`;
+}
+
+function useChatCompletions(): boolean {
+    const explicit = process.env.OPENAI_USE_CHAT_COMPLETIONS?.trim().toLowerCase();
+    if (explicit) return ["1", "true", "yes", "on"].includes(explicit);
+    return openAIBaseUrl() !== DEFAULT_OPENAI_BASE_URL;
+}
+
 function apiKey(override?: string | null): string {
     const key = override?.trim() || process.env.OPENAI_API_KEY?.trim() || "";
     if (!key) {
@@ -43,6 +106,27 @@ function apiKey(override?: string | null): string {
         );
     }
     return key;
+}
+
+function resolveOpenAIModel(model: string): string {
+    const raw = process.env.OPENAI_MODEL_MAP?.trim();
+    if (!raw) return model;
+
+    try {
+        const parsed = JSON.parse(raw) as Record<string, string>;
+        return parsed[model]?.trim() || model;
+    } catch {
+        throw new Error("OPENAI_MODEL_MAP must be valid JSON, e.g. {\"gpt-5.5\":\"openai/gpt-4o\"}");
+    }
+}
+
+function extraHeaders(): Record<string, string> {
+    const headers: Record<string, string> = {};
+    const referer = process.env.OPENAI_HTTP_REFERER?.trim();
+    const title = process.env.OPENAI_APP_TITLE?.trim();
+    if (referer) headers["HTTP-Referer"] = referer;
+    if (title) headers["X-Title"] = title;
+    return headers;
 }
 
 function toResponseTools(tools: OpenAIToolSchema[]): ResponseFunctionTool[] {
@@ -54,11 +138,28 @@ function toResponseTools(tools: OpenAIToolSchema[]): ResponseFunctionTool[] {
     }));
 }
 
+function toChatTools(tools: OpenAIToolSchema[]): ChatTool[] {
+    return tools.map((tool) => ({
+        type: "function",
+        function: tool.function,
+    }));
+}
+
 function toResponseInput(messages: LlmMessage[]): ResponseInputItem[] {
     return messages.map((message) => ({
         role: message.role,
         content: message.content,
     }));
+}
+
+function toChatMessages(messages: LlmMessage[], systemPrompt?: string): ChatMessage[] {
+    return [
+        ...(systemPrompt ? [{ role: "system" as const, content: systemPrompt }] : []),
+        ...messages.map((message) => ({
+            role: message.role,
+            content: message.content,
+        })),
+    ];
 }
 
 function extractSseJson(buffer: string): { events: unknown[]; rest: string } {
@@ -104,6 +205,37 @@ function parseFunctionCall(item: ResponseFunctionCallItem): NormalizedToolCall {
     };
 }
 
+function parseChatToolCall(call: ChatToolCall): NormalizedToolCall {
+    let input: Record<string, unknown> = {};
+    try {
+        const parsed = JSON.parse(call.function.arguments || "{}");
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+            input = parsed as Record<string, unknown>;
+        }
+    } catch {
+        input = {};
+    }
+
+    return {
+        id: call.id,
+        name: call.function.name,
+        input,
+    };
+}
+
+async function checkedFetch(url: string, init: RequestInit, providerName: string): Promise<Response> {
+    const response = await fetch(url, init);
+    if (!response.ok) {
+        const text = await response.text().catch(() => "");
+        const err = new Error(
+            `${providerName} request failed (${response.status}): ${text || response.statusText}`,
+        );
+        (err as { status?: number }).status = response.status;
+        throw err;
+    }
+    return response;
+}
+
 async function createResponse(params: {
     model: string;
     input: ResponseInputItem[];
@@ -115,52 +247,72 @@ async function createResponse(params: {
     reasoningSummary?: boolean;
     apiKey: string;
 }): Promise<Response> {
-    const response = await fetch(OPENAI_RESPONSES_URL, {
-        method: "POST",
-        headers: {
-            Authorization: `Bearer ${params.apiKey}`,
-            "Content-Type": "application/json",
+    return checkedFetch(
+        responsesUrl(),
+        {
+            method: "POST",
+            headers: {
+                Authorization: `Bearer ${params.apiKey}`,
+                "Content-Type": "application/json",
+                ...extraHeaders(),
+            },
+            body: JSON.stringify({
+                model: resolveOpenAIModel(params.model),
+                instructions: params.instructions || undefined,
+                input: params.input,
+                tools: params.tools?.length ? params.tools : undefined,
+                stream: params.stream,
+                max_output_tokens: params.maxTokens ?? MAX_OUTPUT_TOKENS,
+                previous_response_id: params.previousResponseId,
+                reasoning: params.reasoningSummary
+                    ? { summary: "auto" }
+                    : undefined,
+            }),
         },
-        body: JSON.stringify({
-            model: params.model,
-            instructions: params.instructions || undefined,
-            input: params.input,
-            tools: params.tools?.length ? params.tools : undefined,
-            stream: params.stream,
-            max_output_tokens: params.maxTokens ?? MAX_OUTPUT_TOKENS,
-            previous_response_id: params.previousResponseId,
-            reasoning: params.reasoningSummary
-                ? { summary: "auto" }
-                : undefined,
-        }),
-    });
-
-    if (!response.ok) {
-        const text = await response.text().catch(() => "");
-        const err = new Error(
-            `OpenAI request failed (${response.status}): ${text || response.statusText}`,
-        );
-        (err as { status?: number }).status = response.status;
-        throw err;
-    }
-
-    return response;
+        "OpenAI",
+    );
 }
 
-export async function streamOpenAI(
-    params: StreamChatParams,
-): Promise<StreamChatResult> {
+async function createChatCompletion(params: {
+    model: string;
+    messages: ChatMessage[];
+    tools?: ChatTool[];
+    stream?: boolean;
+    maxTokens?: number;
+    apiKey: string;
+}): Promise<Response> {
+    return checkedFetch(
+        chatCompletionsUrl(),
+        {
+            method: "POST",
+            headers: {
+                Authorization: `Bearer ${params.apiKey}`,
+                "Content-Type": "application/json",
+                ...extraHeaders(),
+            },
+            body: JSON.stringify({
+                model: resolveOpenAIModel(params.model),
+                messages: params.messages,
+                tools: params.tools?.length ? params.tools : undefined,
+                tool_choice: params.tools?.length ? "auto" : undefined,
+                stream: params.stream,
+                max_tokens: params.maxTokens ?? MAX_OUTPUT_TOKENS,
+            }),
+        },
+        "OpenAI-compatible",
+    );
+}
+
+async function streamOpenAIResponses(params: StreamChatParams, key: string): Promise<StreamChatResult> {
     const {
         model,
         systemPrompt,
         tools = [],
         callbacks = {},
         runTools,
-        apiKeys,
         enableThinking,
     } = params;
     const maxIter = params.maxIterations ?? 10;
-    const key = apiKey(apiKeys?.openai);
     const responseTools = toResponseTools(tools);
     let input = toResponseInput(params.messages);
     let previousResponseId: string | undefined;
@@ -197,47 +349,30 @@ export async function streamOpenAI(
             buffer = extracted.rest;
 
             for (const event of extracted.events as ResponseStreamEvent[]) {
-                if (event.response?.id) {
-                    previousResponseId = event.response.id;
-                }
+                if (event.response?.id) previousResponseId = event.response.id;
 
-                if (
-                    event.type === "response.reasoning_summary_text.delta" &&
-                    typeof event.delta === "string"
-                ) {
+                if (event.type === "response.reasoning_summary_text.delta" && typeof event.delta === "string") {
                     sawReasoning = true;
                     callbacks.onReasoningDelta?.(event.delta);
                 }
 
-                if (
-                    event.type === "response.output_text.delta" &&
-                    typeof event.delta === "string"
-                ) {
-                    if (hasTools) {
-                        pendingText += event.delta;
-                    } else {
+                if (event.type === "response.output_text.delta" && typeof event.delta === "string") {
+                    if (hasTools) pendingText += event.delta;
+                    else {
                         fullText += event.delta;
                         callbacks.onContentDelta?.(event.delta);
                     }
                 }
 
-                if (
-                    event.type === "response.output_item.added" &&
-                    event.item?.type === "function_call"
-                ) {
+                if (event.type === "response.output_item.added" && event.item?.type === "function_call") {
                     const call = parseFunctionCall(event.item);
                     startedToolCallIds.add(call.id);
                     callbacks.onToolCallStart?.(call);
                 }
 
-                if (
-                    event.type === "response.output_item.done" &&
-                    event.item?.type === "function_call"
-                ) {
+                if (event.type === "response.output_item.done" && event.item?.type === "function_call") {
                     const call = parseFunctionCall(event.item);
-                    if (!startedToolCallIds.has(call.id)) {
-                        callbacks.onToolCallStart?.(call);
-                    }
+                    if (!startedToolCallIds.has(call.id)) callbacks.onToolCallStart?.(call);
                     toolCalls.push(call);
                 }
             }
@@ -264,6 +399,108 @@ export async function streamOpenAI(
     return { fullText };
 }
 
+async function streamOpenAIChatCompletions(params: StreamChatParams, key: string): Promise<StreamChatResult> {
+    const { model, systemPrompt, tools = [], callbacks = {}, runTools } = params;
+    const maxIter = params.maxIterations ?? 10;
+    const chatTools = toChatTools(tools);
+    const messages = toChatMessages(params.messages, systemPrompt);
+    let fullText = "";
+    const hasTools = chatTools.length > 0;
+
+    for (let iter = 0; iter < maxIter; iter++) {
+        const response = await createChatCompletion({
+            model,
+            messages,
+            tools: chatTools,
+            stream: true,
+            apiKey: key,
+        });
+        if (!response.body) throw new Error("OpenAI-compatible response had no body");
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        const toolCallParts = new Map<number, ChatToolCall>();
+        const startedToolCallIds = new Set<string>();
+        let buffer = "";
+        let pendingText = "";
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+            const extracted = extractSseJson(buffer);
+            buffer = extracted.rest;
+
+            for (const event of extracted.events as ChatStreamEvent[]) {
+                const delta = event.choices?.[0]?.delta;
+                if (!delta) continue;
+
+                if (typeof delta.content === "string") {
+                    if (hasTools) pendingText += delta.content;
+                    else {
+                        fullText += delta.content;
+                        callbacks.onContentDelta?.(delta.content);
+                    }
+                }
+
+                for (const chunk of delta.tool_calls ?? []) {
+                    const existing = toolCallParts.get(chunk.index) ?? {
+                        id: chunk.id ?? `tool_call_${chunk.index}`,
+                        type: "function",
+                        function: { name: "", arguments: "" },
+                    };
+                    if (chunk.id) existing.id = chunk.id;
+                    if (chunk.function?.name) existing.function.name += chunk.function.name;
+                    if (chunk.function?.arguments) existing.function.arguments += chunk.function.arguments;
+                    toolCallParts.set(chunk.index, existing);
+
+                    if (!startedToolCallIds.has(existing.id) && existing.function.name) {
+                        startedToolCallIds.add(existing.id);
+                        callbacks.onToolCallStart?.(parseChatToolCall(existing));
+                    }
+                }
+            }
+        }
+
+        const chatToolCalls = [...toolCallParts.entries()]
+            .sort(([a], [b]) => a - b)
+            .map(([, call]) => call)
+            .filter((call) => call.function.name);
+        const toolCalls = chatToolCalls.map(parseChatToolCall);
+
+        if (!toolCalls.length || !runTools) {
+            if (pendingText) {
+                fullText += pendingText;
+                callbacks.onContentDelta?.(pendingText);
+            }
+            break;
+        }
+
+        messages.push({
+            role: "assistant",
+            content: pendingText || null,
+            tool_calls: chatToolCalls,
+        });
+        const results = await runTools(toolCalls);
+        for (const result of results) {
+            messages.push({
+                role: "tool",
+                tool_call_id: result.tool_use_id,
+                content: result.content,
+            });
+        }
+    }
+
+    return { fullText };
+}
+
+export async function streamOpenAI(params: StreamChatParams): Promise<StreamChatResult> {
+    const key = apiKey(params.apiKeys?.openai);
+    if (useChatCompletions()) return streamOpenAIChatCompletions(params, key);
+    return streamOpenAIResponses(params, key);
+}
+
 export async function completeOpenAIText(params: {
     model: string;
     systemPrompt?: string;
@@ -271,12 +508,27 @@ export async function completeOpenAIText(params: {
     maxTokens?: number;
     apiKeys?: { openai?: string | null };
 }): Promise<string> {
+    const key = apiKey(params.apiKeys?.openai);
+
+    if (useChatCompletions()) {
+        const response = await createChatCompletion({
+            model: params.model,
+            messages: toChatMessages([{ role: "user", content: params.user }], params.systemPrompt),
+            maxTokens: params.maxTokens ?? 512,
+            apiKey: key,
+        });
+        const json = (await response.json()) as {
+            choices?: { message?: { content?: string | null } }[];
+        };
+        return json.choices?.[0]?.message?.content ?? "";
+    }
+
     const response = await createResponse({
         model: params.model,
         instructions: params.systemPrompt,
         input: [{ role: "user", content: params.user }],
         maxTokens: params.maxTokens ?? 512,
-        apiKey: apiKey(params.apiKeys?.openai),
+        apiKey: key,
     });
     const json = (await response.json()) as {
         output_text?: string;
