@@ -73,7 +73,7 @@ function isPrivateIp(address: string): boolean {
     return false;
 }
 
-async function validateBaseUrl(value: unknown): Promise<string> {
+async function validateEndpointUrl(value: unknown): Promise<URL> {
     if (typeof value !== "string" || !value.trim()) throw new Error("Base URL is required");
     const url = new URL(value.trim());
     if (url.protocol !== "https:" && process.env.ALLOW_INSECURE_LLM_ENDPOINTS !== "true") {
@@ -87,7 +87,12 @@ async function validateBaseUrl(value: unknown): Promise<string> {
     if (!records.length || records.some((record) => isPrivateIp(record.address))) {
         throw new Error("Endpoint URL resolves to a private or local address");
     }
-    return value.trim().replace(/\/+$/, "");
+    return url;
+}
+
+async function validateBaseUrl(value: unknown): Promise<string> {
+    const url = await validateEndpointUrl(value);
+    return url.toString().replace(/\/+$/, "");
 }
 
 function normalizeList(value: unknown): string[] {
@@ -168,7 +173,8 @@ export async function listAvailableModels(userId: string, db: Db = createServerS
 
 async function fetchModels(row: ConnectionRow, apiKey: string): Promise<{ id: string; label: string }[]> {
     if (!apiKey && !row.model_allowlist?.length) throw new Error("API key is required");
-    const url = `${row.base_url.replace(/\/+$/, "")}/models`;
+    const baseUrl = await validateEndpointUrl(row.base_url);
+    const url = `${baseUrl.toString().replace(/\/+$/, "")}/models`;
     const headers: Record<string, string> = {};
     if (row.provider_type === "openai-compatible") {
         headers.Authorization = `Bearer ${apiKey}`;
@@ -185,7 +191,9 @@ async function fetchModels(row: ConnectionRow, apiKey: string): Promise<{ id: st
     try {
         const res = await fetch(url, { headers, signal: controller.signal });
         if (!res.ok) throw new Error(`Model fetch failed (${res.status})`);
-        const json = await res.json() as { data?: { id?: string; name?: string; display_name?: string }[] };
+        const text = await res.text();
+        if (text.length > 2_000_000) throw new Error("Model response is too large");
+        const json = JSON.parse(text) as { data?: { id?: string; name?: string; display_name?: string }[] };
         return (json.data ?? [])
             .map((m) => ({ id: String(m.id ?? "").trim(), label: String(m.display_name ?? m.name ?? m.id ?? "").trim() }))
             .filter((m) => m.id);

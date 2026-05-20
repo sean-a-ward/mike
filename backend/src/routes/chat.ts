@@ -546,14 +546,6 @@ chatRouter.post("/", requireAuth, async (req, res) => {
         workflowCount: Object.keys(workflowStore).length,
     });
 
-    res.setHeader("Content-Type", "text/event-stream");
-    res.setHeader("Cache-Control", "no-cache");
-    res.setHeader("Connection", "keep-alive");
-    res.setHeader("X-Accel-Buffering", "no");
-    res.flushHeaders();
-
-    const write = (line: string) => res.write(line);
-
     let apiKeys = await getUserApiKeys(userId, db);
     let selectedModel = model;
     try {
@@ -563,6 +555,14 @@ chatRouter.post("/", requireAuth, async (req, res) => {
     } catch (err) {
         return void res.status(409).json({ detail: err instanceof Error ? err.message : "No main model selected" });
     }
+
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Connection", "keep-alive");
+    res.setHeader("X-Accel-Buffering", "no");
+    res.flushHeaders();
+
+    const write = (line: string) => res.write(line);
 
     try {
         write(`data: ${JSON.stringify({ type: "chat_id", chatId })}\n\n`);
