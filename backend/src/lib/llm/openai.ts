@@ -2,6 +2,7 @@ import type {
     LlmMessage,
     NormalizedToolCall,
     NormalizedToolResult,
+    OpenAICompatibleConfig,
     OpenAIToolSchema,
     StreamChatParams,
     StreamChatResult,
@@ -78,24 +79,24 @@ function trimTrailingSlash(value: string): string {
     return value.replace(/\/+$/, "");
 }
 
-function openAIBaseUrl(): string {
+function openAIBaseUrl(override?: string | null): string {
     return trimTrailingSlash(
-        process.env.OPENAI_BASE_URL?.trim() || DEFAULT_OPENAI_BASE_URL,
+        override?.trim() || process.env.OPENAI_BASE_URL?.trim() || DEFAULT_OPENAI_BASE_URL,
     );
 }
 
-function responsesUrl(): string {
-    return `${openAIBaseUrl()}/responses`;
+function responsesUrl(baseUrl?: string | null): string {
+    return `${openAIBaseUrl(baseUrl)}/responses`;
 }
 
-function chatCompletionsUrl(): string {
-    return `${openAIBaseUrl()}/chat/completions`;
+function chatCompletionsUrl(baseUrl?: string | null): string {
+    return `${openAIBaseUrl(baseUrl)}/chat/completions`;
 }
 
-function useChatCompletions(): boolean {
+function useChatCompletions(baseUrl?: string | null): boolean {
     const explicit = process.env.OPENAI_USE_CHAT_COMPLETIONS?.trim().toLowerCase();
     if (explicit) return ["1", "true", "yes", "on"].includes(explicit);
-    return openAIBaseUrl() !== DEFAULT_OPENAI_BASE_URL;
+    return openAIBaseUrl(baseUrl) !== DEFAULT_OPENAI_BASE_URL;
 }
 
 function apiKey(override?: string | null): string {
@@ -108,8 +109,8 @@ function apiKey(override?: string | null): string {
     return key;
 }
 
-function resolveOpenAIModel(model: string): string {
-    const raw = process.env.OPENAI_MODEL_MAP?.trim();
+function resolveOpenAIModel(model: string, modelMap?: string | null): string {
+    const raw = modelMap?.trim() || process.env.OPENAI_MODEL_MAP?.trim();
     if (!raw) return model;
 
     try {
@@ -120,10 +121,10 @@ function resolveOpenAIModel(model: string): string {
     }
 }
 
-function extraHeaders(): Record<string, string> {
+function extraHeaders(config?: { httpReferer?: string | null; appTitle?: string | null }): Record<string, string> {
     const headers: Record<string, string> = {};
-    const referer = process.env.OPENAI_HTTP_REFERER?.trim();
-    const title = process.env.OPENAI_APP_TITLE?.trim();
+    const referer = config?.httpReferer?.trim() || process.env.OPENAI_HTTP_REFERER?.trim();
+    const title = config?.appTitle?.trim() || process.env.OPENAI_APP_TITLE?.trim();
     if (referer) headers["HTTP-Referer"] = referer;
     if (title) headers["X-Title"] = title;
     return headers;
@@ -246,18 +247,22 @@ async function createResponse(params: {
     previousResponseId?: string;
     reasoningSummary?: boolean;
     apiKey: string;
+    baseUrl?: string | null;
+    modelMap?: string | null;
+    httpReferer?: string | null;
+    appTitle?: string | null;
 }): Promise<Response> {
     return checkedFetch(
-        responsesUrl(),
+        responsesUrl(params.baseUrl),
         {
             method: "POST",
             headers: {
                 Authorization: `Bearer ${params.apiKey}`,
                 "Content-Type": "application/json",
-                ...extraHeaders(),
+                ...extraHeaders(params),
             },
             body: JSON.stringify({
-                model: resolveOpenAIModel(params.model),
+                model: resolveOpenAIModel(params.model, params.modelMap),
                 instructions: params.instructions || undefined,
                 input: params.input,
                 tools: params.tools?.length ? params.tools : undefined,
@@ -280,18 +285,22 @@ async function createChatCompletion(params: {
     stream?: boolean;
     maxTokens?: number;
     apiKey: string;
+    baseUrl?: string | null;
+    modelMap?: string | null;
+    httpReferer?: string | null;
+    appTitle?: string | null;
 }): Promise<Response> {
     return checkedFetch(
-        chatCompletionsUrl(),
+        chatCompletionsUrl(params.baseUrl),
         {
             method: "POST",
             headers: {
                 Authorization: `Bearer ${params.apiKey}`,
                 "Content-Type": "application/json",
-                ...extraHeaders(),
+                ...extraHeaders(params),
             },
             body: JSON.stringify({
-                model: resolveOpenAIModel(params.model),
+                model: resolveOpenAIModel(params.model, params.modelMap),
                 messages: params.messages,
                 tools: params.tools?.length ? params.tools : undefined,
                 tool_choice: params.tools?.length ? "auto" : undefined,
@@ -304,6 +313,7 @@ async function createChatCompletion(params: {
 }
 
 async function streamOpenAIResponses(params: StreamChatParams, key: string): Promise<StreamChatResult> {
+    const openaiConfig = params.apiKeys?.openaiConfig;
     const {
         model,
         systemPrompt,
@@ -329,6 +339,7 @@ async function streamOpenAIResponses(params: StreamChatParams, key: string): Pro
             previousResponseId,
             reasoningSummary: !!enableThinking,
             apiKey: key,
+            ...openaiConfig,
         });
         if (!response.body) throw new Error("OpenAI response had no body");
 
@@ -400,6 +411,7 @@ async function streamOpenAIResponses(params: StreamChatParams, key: string): Pro
 }
 
 async function streamOpenAIChatCompletions(params: StreamChatParams, key: string): Promise<StreamChatResult> {
+    const openaiConfig = params.apiKeys?.openaiConfig;
     const { model, systemPrompt, tools = [], callbacks = {}, runTools } = params;
     const maxIter = params.maxIterations ?? 10;
     const chatTools = toChatTools(tools);
@@ -414,6 +426,7 @@ async function streamOpenAIChatCompletions(params: StreamChatParams, key: string
             tools: chatTools,
             stream: true,
             apiKey: key,
+            ...openaiConfig,
         });
         if (!response.body) throw new Error("OpenAI-compatible response had no body");
 
@@ -497,7 +510,7 @@ async function streamOpenAIChatCompletions(params: StreamChatParams, key: string
 
 export async function streamOpenAI(params: StreamChatParams): Promise<StreamChatResult> {
     const key = apiKey(params.apiKeys?.openai);
-    if (useChatCompletions()) return streamOpenAIChatCompletions(params, key);
+    if (useChatCompletions(params.apiKeys?.openaiConfig?.baseUrl)) return streamOpenAIChatCompletions(params, key);
     return streamOpenAIResponses(params, key);
 }
 
@@ -506,16 +519,18 @@ export async function completeOpenAIText(params: {
     systemPrompt?: string;
     user: string;
     maxTokens?: number;
-    apiKeys?: { openai?: string | null };
+    apiKeys?: { openai?: string | null; openaiConfig?: OpenAICompatibleConfig };
 }): Promise<string> {
     const key = apiKey(params.apiKeys?.openai);
+    const openaiConfig = params.apiKeys?.openaiConfig;
 
-    if (useChatCompletions()) {
+    if (useChatCompletions(openaiConfig?.baseUrl)) {
         const response = await createChatCompletion({
             model: params.model,
             messages: toChatMessages([{ role: "user", content: params.user }], params.systemPrompt),
             maxTokens: params.maxTokens ?? 512,
             apiKey: key,
+            ...openaiConfig,
         });
         const json = (await response.json()) as {
             choices?: { message?: { content?: string | null } }[];
@@ -529,6 +544,7 @@ export async function completeOpenAIText(params: {
         input: [{ role: "user", content: params.user }],
         maxTokens: params.maxTokens ?? 512,
         apiKey: key,
+        ...openaiConfig,
     });
     const json = (await response.json()) as {
         output_text?: string;

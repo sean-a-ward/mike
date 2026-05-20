@@ -36,10 +36,18 @@ export type StreamCallbacks = {
     onToolCallStart?: (call: NormalizedToolCall) => void;
 };
 
+export type OpenAICompatibleConfig = {
+    baseUrl?: string | null;
+    modelMap?: string | null;
+    httpReferer?: string | null;
+    appTitle?: string | null;
+};
+
 export type UserApiKeys = {
     claude?: string | null;
     gemini?: string | null;
     openai?: string | null;
+    openaiConfig?: OpenAICompatibleConfig;
 };
 
 export type StreamChatParams = {

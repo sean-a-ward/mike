@@ -12,9 +12,11 @@ import { useAuth } from "@/contexts/AuthContext";
 import {
     type ApiKeyState,
     type ApiKeyProvider,
+    type OpenAIProviderConfig,
     type UserProfile as ApiUserProfile,
     getUserProfile,
     saveApiKey,
+    saveOpenAIConfig,
     updateUserProfile,
 } from "@/app/lib/mikeApi";
 
@@ -27,6 +29,7 @@ interface UserProfile {
     tier: string;
     tabularModel: string;
     apiKeys: ApiKeyState;
+    openaiConfig: OpenAIProviderConfig;
 }
 
 interface UserProfileContextType {
@@ -42,6 +45,7 @@ interface UserProfileContextType {
         provider: ApiKeyProvider,
         value: string | null,
     ) => Promise<boolean>;
+    updateOpenAIConfig: (config: OpenAIProviderConfig) => Promise<boolean>;
     reloadProfile: () => Promise<void>;
     incrementMessageCredits: () => Promise<boolean>;
 }
@@ -75,6 +79,12 @@ function toProfile(data: ApiUserProfile): UserProfile {
     return {
         ...profile,
         apiKeys,
+        openaiConfig: apiKeyStatus.openaiConfig ?? {
+            baseUrl: null,
+            modelMap: null,
+            httpReferer: null,
+            appTitle: null,
+        },
     };
 }
 
@@ -102,6 +112,12 @@ export function UserProfileProvider({ children }: { children: ReactNode }) {
                 tier: "Free",
                 tabularModel: "gemini-3-flash-preview",
                 apiKeys: emptyApiKeys(),
+                openaiConfig: {
+                    baseUrl: null,
+                    modelMap: null,
+                    httpReferer: null,
+                    appTitle: null,
+                },
             });
         } finally {
             setLoading(false);
@@ -203,6 +219,27 @@ export function UserProfileProvider({ children }: { children: ReactNode }) {
         [user],
     );
 
+    const updateOpenAIConfig = useCallback(
+        async (config: OpenAIProviderConfig): Promise<boolean> => {
+            if (!user) return false;
+            try {
+                const status = await saveOpenAIConfig(config);
+                setProfile((prev) =>
+                    prev
+                        ? {
+                              ...prev,
+                              openaiConfig: status.openaiConfig ?? config,
+                          }
+                        : null,
+                );
+                return true;
+            } catch {
+                return false;
+            }
+        },
+        [user],
+    );
+
     const reloadProfile = useCallback(async () => {
         if (user) {
             await loadProfile();
@@ -231,6 +268,7 @@ export function UserProfileProvider({ children }: { children: ReactNode }) {
                 updateOrganisation,
                 updateModelPreference,
                 updateApiKey,
+                updateOpenAIConfig,
                 reloadProfile,
                 incrementMessageCredits,
             }}

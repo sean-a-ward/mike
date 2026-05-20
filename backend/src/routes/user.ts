@@ -7,6 +7,7 @@ import {
   getUserApiKeyStatus,
   hasEnvApiKey,
   normalizeApiKeyProvider,
+  saveOpenAIProviderConfig,
   saveUserApiKey,
 } from "../lib/userApiKeys";
 
@@ -250,6 +251,36 @@ userRouter.put("/api-keys/:provider", requireAuth, async (req, res) => {
       error: err instanceof Error ? err.message : String(err),
     });
     res.status(500).json({ detail: "Failed to save API key" });
+  }
+});
+
+// PUT /user/openai-config
+userRouter.put("/openai-config", requireAuth, async (req, res) => {
+  const userId = res.locals.userId as string;
+  const db = createServerSupabase();
+  const readString = (key: string) => {
+    const value = req.body?.[key];
+    return typeof value === "string" ? value : null;
+  };
+
+  try {
+    await saveOpenAIProviderConfig(
+      userId,
+      {
+        baseUrl: readString("baseUrl"),
+        modelMap: readString("modelMap"),
+        httpReferer: readString("httpReferer"),
+        appTitle: readString("appTitle"),
+      },
+      db,
+    );
+    const status = await getUserApiKeyStatus(userId, db);
+    res.json(status);
+  } catch (err) {
+    const detail = err instanceof SyntaxError
+      ? "Model map must be valid JSON."
+      : "Failed to save OpenAI-compatible endpoint settings";
+    res.status(err instanceof SyntaxError ? 400 : 500).json({ detail });
   }
 });
 

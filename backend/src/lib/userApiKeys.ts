@@ -5,8 +5,16 @@ import type { UserApiKeys } from "./llm";
 type Db = ReturnType<typeof createServerSupabase>;
 export type ApiKeyProvider = "claude" | "gemini" | "openai";
 export type ApiKeySource = "user" | "env" | null;
+export type OpenAIProviderConfig = {
+    baseUrl: string | null;
+    modelMap: string | null;
+    httpReferer: string | null;
+    appTitle: string | null;
+};
+
 export type ApiKeyStatus = Record<ApiKeyProvider, boolean> & {
     sources: Record<ApiKeyProvider, ApiKeySource>;
+    openaiConfig: OpenAIProviderConfig;
 };
 
 type EncryptedKeyRow = {
@@ -14,6 +22,10 @@ type EncryptedKeyRow = {
     encrypted_key: string;
     iv: string;
     auth_tag: string;
+    openai_base_url?: string | null;
+    openai_model_map?: string | null;
+    openai_http_referer?: string | null;
+    openai_app_title?: string | null;
 };
 
 const PROVIDERS: ApiKeyProvider[] = ["claude", "gemini", "openai"];
@@ -88,6 +100,25 @@ export function normalizeApiKeyProvider(value: string): ApiKeyProvider | null {
     return isProvider(value) ? value : null;
 }
 
+function envOpenAIConfig(): OpenAIProviderConfig {
+    return {
+        baseUrl: process.env.OPENAI_BASE_URL?.trim() || null,
+        modelMap: process.env.OPENAI_MODEL_MAP?.trim() || null,
+        httpReferer: process.env.OPENAI_HTTP_REFERER?.trim() || null,
+        appTitle: process.env.OPENAI_APP_TITLE?.trim() || null,
+    };
+}
+
+function openAIConfigFromRow(row?: Partial<EncryptedKeyRow> | null): OpenAIProviderConfig {
+    const envConfig = envOpenAIConfig();
+    return {
+        baseUrl: row?.openai_base_url?.trim() || envConfig.baseUrl,
+        modelMap: row?.openai_model_map?.trim() || envConfig.modelMap,
+        httpReferer: row?.openai_http_referer?.trim() || envConfig.httpReferer,
+        appTitle: row?.openai_app_title?.trim() || envConfig.appTitle,
+    };
+}
+
 export async function getUserApiKeyStatus(
     userId: string,
     db: Db = createServerSupabase(),
@@ -101,6 +132,7 @@ export async function getUserApiKeyStatus(
             gemini: null,
             openai: null,
         },
+        openaiConfig: envOpenAIConfig(),
     };
 
     for (const provider of PROVIDERS) {
@@ -112,15 +144,19 @@ export async function getUserApiKeyStatus(
 
     const { data, error } = await db
         .from("user_api_keys")
-        .select("provider")
+        .select("provider, encrypted_key, iv, auth_tag, openai_base_url, openai_model_map, openai_http_referer, openai_app_title")
         .eq("user_id", userId);
     if (error) throw error;
 
-    for (const row of data ?? []) {
+    for (const row of (data ?? []) as Partial<EncryptedKeyRow>[]) {
         const provider = normalizeApiKeyProvider(String(row.provider));
-        if (provider && !status[provider]) {
+        const decryptedKey = provider ? decrypt(row as EncryptedKeyRow) : null;
+        if (provider && decryptedKey?.trim() && !status[provider]) {
             status[provider] = true;
             status.sources[provider] = "user";
+        }
+        if (provider === "openai") {
+            status.openaiConfig = openAIConfigFromRow(row);
         }
     }
 
@@ -139,17 +175,21 @@ export async function getUserApiKeys(
 
     const { data, error } = await db
         .from("user_api_keys")
-        .select("provider, encrypted_key, iv, auth_tag")
+        .select("provider, encrypted_key, iv, auth_tag, openai_base_url, openai_model_map, openai_http_referer, openai_app_title")
         .eq("user_id", userId);
     if (error) throw error;
 
     for (const row of (data ?? []) as EncryptedKeyRow[]) {
         const provider = normalizeApiKeyProvider(row.provider);
         if (!provider) continue;
+        if (provider === "openai") {
+            apiKeys.openaiConfig = openAIConfigFromRow(row);
+        }
         if (apiKeys[provider]?.trim()) continue;
         apiKeys[provider] = decrypt(row);
     }
 
+    apiKeys.openaiConfig ??= envOpenAIConfig();
     return apiKeys;
 }
 
@@ -179,5 +219,49 @@ export async function saveUserApiKey(
         },
         { onConflict: "user_id,provider" },
     );
+    if (error) throw error;
+}
+
+export async function saveOpenAIProviderConfig(
+    userId: string,
+    config: OpenAIProviderConfig,
+    db: Db = createServerSupabase(),
+): Promise<void> {
+    const normalize = (value: string | null | undefined) => value?.trim() || null;
+    const modelMap = normalize(config.modelMap);
+    if (modelMap) JSON.parse(modelMap);
+
+    const existing = await db
+        .from("user_api_keys")
+        .select("provider")
+        .eq("user_id", userId)
+        .eq("provider", "openai")
+        .maybeSingle();
+    if (existing.error) throw existing.error;
+
+    const update = {
+        openai_base_url: normalize(config.baseUrl),
+        openai_model_map: modelMap,
+        openai_http_referer: normalize(config.httpReferer),
+        openai_app_title: normalize(config.appTitle),
+        updated_at: new Date().toISOString(),
+    };
+
+    if (existing.data) {
+        const { error } = await db
+            .from("user_api_keys")
+            .update(update)
+            .eq("user_id", userId)
+            .eq("provider", "openai");
+        if (error) throw error;
+        return;
+    }
+
+    const { error } = await db.from("user_api_keys").insert({
+        user_id: userId,
+        provider: "openai",
+        ...encrypt(""),
+        ...update,
+    });
     if (error) throw error;
 }

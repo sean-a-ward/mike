@@ -40,7 +40,7 @@ const API_KEY_FIELDS = [
 ] as const;
 
 export default function ModelsAndApiKeysPage() {
-    const { profile, updateModelPreference, updateApiKey } = useUserProfile();
+    const { profile, updateModelPreference, updateApiKey, updateOpenAIConfig } = useUserProfile();
 
     return (
         <div className="space-y-4">
@@ -91,6 +91,10 @@ export default function ModelsAndApiKeysPage() {
                     configured provider model.
                 </p>
                 <div className="space-y-4 max-w-xl">
+                    <OpenAICompatibleConfigForm
+                        config={profile?.openaiConfig}
+                        onSave={updateOpenAIConfig}
+                    />
                     {API_KEY_FIELDS.map((field) => (
                         <ApiKeyField
                             key={field.provider}
@@ -207,6 +211,135 @@ function TabularModelDropdown({
                 })}
             </DropdownMenuContent>
         </DropdownMenu>
+    );
+}
+
+function OpenAICompatibleConfigForm({
+    config,
+    onSave,
+}: {
+    config?: {
+        baseUrl: string | null;
+        modelMap: string | null;
+        httpReferer: string | null;
+        appTitle: string | null;
+    };
+    onSave: (config: {
+        baseUrl: string | null;
+        modelMap: string | null;
+        httpReferer: string | null;
+        appTitle: string | null;
+    }) => Promise<boolean>;
+}) {
+    const [baseUrl, setBaseUrl] = useState(config?.baseUrl ?? "");
+    const [modelMap, setModelMap] = useState(config?.modelMap ?? "");
+    const [httpReferer, setHttpReferer] = useState(config?.httpReferer ?? "");
+    const [appTitle, setAppTitle] = useState(config?.appTitle ?? "");
+    const [isSaving, setIsSaving] = useState(false);
+    const [saved, setSaved] = useState(false);
+
+    useEffect(() => {
+        setBaseUrl(config?.baseUrl ?? "");
+        setModelMap(config?.modelMap ?? "");
+        setHttpReferer(config?.httpReferer ?? "");
+        setAppTitle(config?.appTitle ?? "");
+    }, [config]);
+
+    const save = async () => {
+        if (modelMap.trim()) {
+            try {
+                JSON.parse(modelMap);
+            } catch {
+                alert("Model map must be valid JSON.");
+                return;
+            }
+        }
+
+        setIsSaving(true);
+        const ok = await onSave({
+            baseUrl: baseUrl.trim() || null,
+            modelMap: modelMap.trim() || null,
+            httpReferer: httpReferer.trim() || null,
+            appTitle: appTitle.trim() || null,
+        });
+        setIsSaving(false);
+        if (ok) {
+            setSaved(true);
+            setTimeout(() => setSaved(false), 2000);
+        } else {
+            alert("Failed to save OpenAI-compatible endpoint settings.");
+        }
+    };
+
+    return (
+        <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+            <h3 className="text-sm font-medium text-gray-900">
+                OpenAI-compatible endpoint
+            </h3>
+            <p className="mt-1 text-xs text-gray-500">
+                Optional. Use this for OpenRouter, LiteLLM, LM Studio, or another
+                OpenAI-compatible /chat/completions endpoint.
+            </p>
+            <div className="mt-4 space-y-3">
+                <div>
+                    <label className="text-xs text-gray-600 block mb-1">
+                        Base URL
+                    </label>
+                    <Input
+                        value={baseUrl}
+                        onChange={(e) => setBaseUrl(e.target.value)}
+                        placeholder="https://openrouter.ai/api/v1"
+                        spellCheck={false}
+                    />
+                </div>
+                <div>
+                    <label className="text-xs text-gray-600 block mb-1">
+                        Model map JSON
+                    </label>
+                    <Input
+                        value={modelMap}
+                        onChange={(e) => setModelMap(e.target.value)}
+                        placeholder='{"gpt-5.5":"openai/gpt-4o","gpt-5.4-mini":"anthropic/claude-sonnet-4.5"}'
+                        spellCheck={false}
+                    />
+                    <p className="mt-1 text-[11px] text-gray-400">
+                        Maps Mike's OpenAI model choices to provider model IDs.
+                    </p>
+                </div>
+                <div className="grid gap-3 sm:grid-cols-2">
+                    <div>
+                        <label className="text-xs text-gray-600 block mb-1">
+                            HTTP referer
+                        </label>
+                        <Input
+                            value={httpReferer}
+                            onChange={(e) => setHttpReferer(e.target.value)}
+                            placeholder="https://mike.runarr.com"
+                            spellCheck={false}
+                        />
+                    </div>
+                    <div>
+                        <label className="text-xs text-gray-600 block mb-1">
+                            App title
+                        </label>
+                        <Input
+                            value={appTitle}
+                            onChange={(e) => setAppTitle(e.target.value)}
+                            placeholder="Mike"
+                            spellCheck={false}
+                        />
+                    </div>
+                </div>
+                <Button
+                    type="button"
+                    onClick={save}
+                    disabled={isSaving || saved}
+                    className="bg-black text-white hover:bg-gray-900"
+                >
+                    {isSaving ? "Saving..." : saved ? "Saved" : "Save endpoint settings"}
+                </Button>
+            </div>
+        </div>
     );
 }
 

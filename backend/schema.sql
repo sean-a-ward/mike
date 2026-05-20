@@ -54,6 +54,10 @@ create table if not exists public.user_api_keys (
   encrypted_key text not null,
   iv text not null,
   auth_tag text not null,
+  openai_base_url text,
+  openai_model_map text,
+  openai_http_referer text,
+  openai_app_title text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   unique(user_id, provider)

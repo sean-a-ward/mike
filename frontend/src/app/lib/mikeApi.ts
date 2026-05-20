@@ -134,8 +134,16 @@ export type ApiKeyState = Record<
     }
 >;
 
+export type OpenAIProviderConfig = {
+    baseUrl: string | null;
+    modelMap: string | null;
+    httpReferer: string | null;
+    appTitle: string | null;
+};
+
 export type ApiKeyStatus = Record<ApiKeyProvider, boolean> & {
     sources?: Partial<Record<ApiKeyProvider, ApiKeySource>>;
+    openaiConfig?: OpenAIProviderConfig;
 };
 
 export async function getApiKeyStatus(): Promise<ApiKeyStatus> {
@@ -150,6 +158,16 @@ export async function saveApiKey(
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ api_key: apiKey }),
+    });
+}
+
+export async function saveOpenAIConfig(
+    config: OpenAIProviderConfig,
+): Promise<ApiKeyStatus> {
+    return apiRequest<ApiKeyStatus>("/user/openai-config", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(config),
     });
 }
 
