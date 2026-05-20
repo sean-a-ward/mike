@@ -142,10 +142,18 @@ export async function getUserApiKeyStatus(
         }
     }
 
-    const { data, error } = await db
+    let { data, error } = await db
         .from("user_api_keys")
         .select("provider, encrypted_key, iv, auth_tag, openai_base_url, openai_model_map, openai_http_referer, openai_app_title")
         .eq("user_id", userId);
+    if (error && error.message.includes("openai_")) {
+        const fallback = await db
+            .from("user_api_keys")
+            .select("provider, encrypted_key, iv, auth_tag")
+            .eq("user_id", userId);
+        data = fallback.data as typeof data;
+        error = fallback.error;
+    }
     if (error) throw error;
 
     for (const row of (data ?? []) as Partial<EncryptedKeyRow>[]) {
@@ -173,10 +181,18 @@ export async function getUserApiKeys(
         openai: envApiKey("openai"),
     };
 
-    const { data, error } = await db
+    let { data, error } = await db
         .from("user_api_keys")
         .select("provider, encrypted_key, iv, auth_tag, openai_base_url, openai_model_map, openai_http_referer, openai_app_title")
         .eq("user_id", userId);
+    if (error && error.message.includes("openai_")) {
+        const fallback = await db
+            .from("user_api_keys")
+            .select("provider, encrypted_key, iv, auth_tag")
+            .eq("user_id", userId);
+        data = fallback.data as typeof data;
+        error = fallback.error;
+    }
     if (error) throw error;
 
     for (const row of (data ?? []) as EncryptedKeyRow[]) {
